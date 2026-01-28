@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCP Billing Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            --card-bg: rgba(255, 255, 255, 0.95);
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            --card-border: rgba(255, 255, 255, 0.18);
+            --text-primary: #1a1a2e;
+            --text-secondary: #6c757d;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            padding: 20px;
+            background-attachment: fixed;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(102, 126, 234, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(118, 75, 162, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(240, 147, 251, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .header {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 30px 35px;
+            border-radius: 24px;
+            box-shadow: var(--card-shadow);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            border: 1px solid var(--card-border);
+            animation: slideDown 0.6s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header h1 {
+            background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header h1::before {
+            content: '💰';
+            font-size: 36px;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+        }
+
+        .project-selector {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .project-selector label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .project-selector select {
+            padding: 12px 24px;
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            border-radius: 12px;
+            font-size: 15px;
+            background: white;
+            cursor: pointer;
+            transition: var(--transition);
+            font-weight: 500;
+            color: var(--text-primary);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .project-selector select:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .project-selector select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 28px;
+            border-radius: 24px;
+            box-shadow: var(--card-shadow);
+            transition: var(--transition);
+            border: 1px solid var(--card-border);
+            position: relative;
+            overflow: hidden;
+            animation: fadeInUp 0.6s ease-out backwards;
+        }
+
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+        .stat-card:nth-child(5) { animation-delay: 0.5s; }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+            border-radius: 24px 24px 0 0;
+        }
+
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(102, 126, 234, 0.05) 0%, transparent 70%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .stat-card:hover::after {
+            opacity: 1;
+        }
+
+        .stat-card:nth-child(1)::before { background: linear-gradient(90deg, #ff6b6b, #ee5a6f); }
+        .stat-card:nth-child(2)::before { background: linear-gradient(90deg, #4ecdc4, #44a08d); }
+        .stat-card:nth-child(3)::before { background: linear-gradient(90deg, #f093fb, #f5576c); }
+        .stat-card:nth-child(4)::before { background: linear-gradient(90deg, #4facfe, #00f2fe); }
+        .stat-card:nth-child(5)::before { background: linear-gradient(90deg, #fa709a, #fee140); }
+
+        .stat-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        }
+
+        .stat-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .stat-card h3 {
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .stat-card-icon {
+            font-size: 24px;
+            opacity: 0.7;
+            transition: var(--transition);
+        }
+
+        .stat-card:hover .stat-card-icon {
+            opacity: 1;
+            transform: scale(1.1) rotate(5deg);
+        }
+
+        .stat-card .value {
+            font-size: 48px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+            line-height: 1.1;
+            letter-spacing: -1px;
+        }
+
+        .stat-card:nth-child(1) .value { background: linear-gradient(135deg, #ff6b6b, #ee5a6f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat-card:nth-child(2) .value { background: linear-gradient(135deg, #4ecdc4, #44a08d); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat-card:nth-child(3) .value { background: linear-gradient(135deg, #f093fb, #f5576c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat-card:nth-child(4) .value { background: linear-gradient(135deg, #4facfe, #00f2fe); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .stat-card:nth-child(5) .value { background: linear-gradient(135deg, #fa709a, #fee140); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+        .stat-card .currency {
+            font-size: 16px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-card .change {
+            font-size: 13px;
+            margin-top: 12px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 600;
+        }
+
+        .stat-card .change.positive {
+            background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+            color: #2e7d32;
+        }
+
+        .stat-card .change.negative {
+            background: linear-gradient(135deg, #ffebee, #ffcdd2);
+            color: #c62828;
+        }
+
+        .chart-container {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 35px;
+            border-radius: 24px;
+            box-shadow: var(--card-shadow);
+            margin-bottom: 30px;
+            border: 1px solid var(--card-border);
+            position: relative;
+            overflow: hidden;
+            animation: fadeInUp 0.6s ease-out backwards;
+            transition: var(--transition);
+        }
+
+        .chart-container:nth-of-type(1) { animation-delay: 0.6s; }
+        .chart-container:nth-of-type(2) { animation-delay: 0.7s; }
+        .chart-container:nth-of-type(3) { animation-delay: 0.8s; }
+        .chart-container:nth-of-type(4) { animation-delay: 0.9s; }
+
+        .chart-container:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.12);
+        }
+
+        .chart-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(90deg, #667eea, #764ba2, #f093fb);
+            border-radius: 24px 24px 0 0;
+        }
+
+        .chart-container h2 {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 12px;
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .chart-container p {
+            color: var(--text-secondary);
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        /* Make the pie chart section more compact */
+        .chart-container--pie {
+            padding: 28px;
+        }
+
+        .chart-container--pie canvas {
+            height: 360px !important;
+            max-height: 360px !important;
+        }
+
+        @media (max-width: 768px) {
+            .chart-container--pie canvas {
+                height: 280px !important;
+                max-height: 280px !important;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 40px;
+            color: white;
+            font-size: 18px;
+            font-weight: 500;
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            box-shadow: var(--card-shadow);
+            border: 1px solid var(--card-border);
+        }
+
+        .loading::after {
+            content: '...';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+
+        .error {
+            background: linear-gradient(135deg, #ffebee, #ffcdd2);
+            color: #c62828;
+            padding: 20px 24px;
+            border-radius: 16px;
+            margin: 20px 0;
+            border-left: 5px solid #c62828;
+            box-shadow: 0 4px 12px rgba(198, 40, 40, 0.15);
+            font-weight: 500;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: var(--transition);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .refresh-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .refresh-btn:active {
+            transform: translateY(0);
+        }
+
+        .last-updated {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 12px;
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 24px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+            
+            .chart-container {
+                padding: 20px;
+            }
+            
+            .stat-card .value {
+                font-size: 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💰 GCP Billing Dashboard</h1>
+            <div class="project-selector">
+                <label for="projectSelect">Project:</label>
+                <select id="projectSelect" onchange="loadData()"></select>
+                <button class="refresh-btn" onclick="loadData()">🔄 Refresh</button>
+            </div>
+        </div>
+
+        <div id="loading" class="loading">Loading billing data...</div>
+        <div id="error" class="error" style="display: none;"></div>
+
+        <div id="dashboard" style="display: none;">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3>Yesterday's Cost</h3>
+                        <span class="stat-card-icon">📅</span>
+                    </div>
+                    <div class="value" id="yesterdayCost">₹0</div>
+                    <div class="currency">INR</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3>Today's Cost</h3>
+                        <span class="stat-card-icon">⚡</span>
+                    </div>
+                    <div class="value" id="todayCost">₹0</div>
+                    <div class="currency">INR</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3>This Week Cost</h3>
+                        <span class="stat-card-icon">📊</span>
+                    </div>
+                    <div class="value" id="thisWeekCost">₹0</div>
+                    <div class="currency">INR</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3>This Month Cost</h3>
+                        <span class="stat-card-icon">💳</span>
+                    </div>
+                    <div class="value" id="thisMonthCost">₹0</div>
+                    <div class="currency">INR</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-header">
+                        <h3>Previous Month Cost</h3>
+                        <span class="stat-card-icon">📈</span>
+                    </div>
+                    <div class="value" id="previousMonthCost">₹0</div>
+                    <div class="currency">INR</div>
+                    <div class="last-updated" id="lastUpdated"></div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h2>📉 Daily Cost Breakdown (Last 7 Days)</h2>
+                <p>Each bar shows the complete day's cost</p>
+                <canvas id="costChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <h2>🔧 Cost by Service</h2>
+                <p>Total cost breakdown across all GCP services</p>
+                <canvas id="serviceChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <h2>📅 Cost by Service (Day-wise)</h2>
+                <p style="color: #666; margin-bottom: 15px; font-size: 14px;">Stacked bars show each service’s cost per day for the last 7 complete days.</p>
+                <canvas id="dailyByServiceChart"></canvas>
+            </div>
+
+            <div class="chart-container chart-container--pie">
+                <h2>🥧 Service Cost Distribution</h2>
+                <p>Visual breakdown of cost allocation across services</p>
+                <canvas id="pieChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="./dashboard_config.js"></script>
+    <script>
+        const DASHBOARD_CONFIG_LOADED = !!(window.DASHBOARD_CONFIG && typeof window.DASHBOARD_CONFIG === 'object');
+        const PROMETHEUS_URL = (DASHBOARD_CONFIG_LOADED && window.DASHBOARD_CONFIG.prometheusUrl) ? window.DASHBOARD_CONFIG.prometheusUrl : '';
+        let costChart = null;
+        let serviceChart = null;
+        let dailyByServiceChart = null;
+        let pieChart = null;
+        
+        // Vibrant color palette
+        const chartColors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
+            '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#52BE80',
+            '#EC7063', '#5DADE2', '#F1948A', '#85C1E9', '#73C6B6'
+        ];
+
+        // Projects configuration (generated from .env)
+        const projects = {};
+        if (DASHBOARD_CONFIG_LOADED && Array.isArray(window.DASHBOARD_CONFIG.projects)) {
+            window.DASHBOARD_CONFIG.projects.forEach(p => {
+                if (p && p.id) projects[p.id] = { id: p.id, name: p.name || p.id };
+            });
+        }
+
+        // Helper function to get current date in India timezone (IST)
+        function getIndiaDate() {
+            const now = new Date();
+            // IST is UTC+5:30
+            const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+            const utcTime = now.getTime() + (now.getTimezoneOffset() * 60 * 1000);
+            const istTime = new Date(utcTime + istOffset);
+            return istTime;
+        }
+
+        // Helper function to format date as YYYY-MM-DD in IST
+        function formatISTDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Populate project dropdown from generated config
+            const select = document.getElementById('projectSelect');
+            select.innerHTML = '';
+            const ids = Object.keys(projects);
+            if (ids.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No projects configured (run generate_dashboard_config.py)';
+                select.appendChild(opt);
+            } else {
+                ids.forEach(id => {
+                    const p = projects[id];
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = `${p.name} (${p.id})`;
+                    select.appendChild(opt);
+                });
+            }
+            loadData();
+            // Auto-refresh every 30 seconds
+            setInterval(loadData, 30000);
+        });
+
+        async function loadData() {
+            const projectId = document.getElementById('projectSelect').value;
+            const project = projects[projectId];
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('dashboard').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+
+            // Initialize variables
+            let dailyCostData = [];
+            let dailyData = [];
+            let serviceCosts = [];
+            let currentTotal = 0;
+            let yesterdayCost = 0;
+            let todayCost = 0;
+            let thisWeekCost = 0;
+            let thisMonthCost = 0;
+            let previousMonthCost = 0;
+
+            try {
+                if (!PROMETHEUS_URL) {
+                    throw new Error('Prometheus URL not configured. Run generate_dashboard_config.py and ensure DASHBOARD_PROMETHEUS_URL is set in .env');
+                }
+                if (!projectId) {
+                    throw new Error('Project not configured. Run generate_dashboard_config.py and ensure GCP_PROJECT_ID is set in .env');
+                }
+                // Get current total cost
+                const totalCost = await queryPrometheus(`gcp_billing_cost_total{project="${projectId}"}`);
+                currentTotal = totalCost.length > 0 ? parseFloat(totalCost[0].value[1]) : 0;
+                
+                // Get cost by service
+                serviceCosts = await queryPrometheus(`gcp_billing_cost{project="${projectId}"}`);
+                
+                // Get daily cost by service (day-wise breakdown per service)
+                let dailyByServiceData = [];
+                try {
+                    dailyByServiceData = await queryPrometheus(`gcp_billing_cost_daily_by_service{project="${projectId}"}`);
+                } catch (e) {
+                    console.warn('Could not fetch daily-by-service data:', e);
+                }
+                
+                // Get daily cost data directly (not cumulative) - get this first for accurate calculations
+                try {
+                    dailyCostData = await queryPrometheus(`gcp_billing_cost_daily{project="${projectId}"}`);
+                    
+                    // Create a map of all daily costs for easy lookup
+                    const dailyCostMap = new Map();
+                    if (dailyCostData && Array.isArray(dailyCostData) && dailyCostData.length > 0) {
+                        dailyCostData.forEach(point => {
+                            if (point && point.metric && point.metric.date && point.value) {
+                                const dateStr = point.metric.date; // Format: YYYY-MM-DD
+                                const cost = parseFloat(point.value[1]) || 0;
+                                dailyCostMap.set(dateStr, cost);
+                            }
+                        });
+                    }
+                    
+                    // Use India timezone (IST) for all date calculations
+                    const nowIST = getIndiaDate();
+                    const todayIST = new Date(nowIST);
+                    todayIST.setHours(0, 0, 0, 0);
+                    
+                    // Get yesterday's complete day cost from daily metrics
+                    const yesterdayIST = new Date(todayIST);
+                    yesterdayIST.setDate(yesterdayIST.getDate() - 1);
+                    const yesterdayKey = formatISTDate(yesterdayIST);
+                    
+                    console.log('IST - Looking for yesterday:', yesterdayKey, 'Date:', yesterdayIST.toLocaleDateString('en-IN'));
+                    console.log('Available dates in dailyCostMap:', Array.from(dailyCostMap.keys()).sort());
+                    console.log('Daily cost map entries:', Array.from(dailyCostMap.entries()));
+                    
+                    if (dailyCostMap.has(yesterdayKey)) {
+                        yesterdayCost = dailyCostMap.get(yesterdayKey);
+                        console.log('Found yesterday cost:', yesterdayCost, 'from metric date:', yesterdayKey);
+                    } else {
+                        console.log('Yesterday data not found. Available dates:', Array.from(dailyCostMap.keys()).sort());
+                        // Try to find the most recent date that's not today
+                        const sortedDates = Array.from(dailyCostMap.keys()).sort().reverse();
+                        if (sortedDates.length > 0) {
+                            const mostRecentDate = sortedDates[0];
+                            if (mostRecentDate !== formatISTDate(todayIST)) {
+                                console.log('Using most recent available date as yesterday:', mostRecentDate);
+                                yesterdayCost = dailyCostMap.get(mostRecentDate);
+                            }
+                        }
+                    }
+                    
+                    // Get today's cost so far from daily metrics
+                    const todayKey = formatISTDate(todayIST);
+                    
+                    console.log('IST - Looking for today:', todayKey, 'Date:', todayIST.toLocaleDateString('en-IN'));
+                    
+                    if (dailyCostMap.has(todayKey)) {
+                        todayCost = dailyCostMap.get(todayKey);
+                        console.log('Found today cost:', todayCost, 'from metric date:', todayKey);
+                    } else {
+                        console.log('Today data not found. Available dates:', Array.from(dailyCostMap.keys()).sort());
+                    }
+                    
+                    // Calculate This Week Cost: Sum of last 7 COMPLETE days from daily costs (excluding today)
+                    thisWeekCost = 0;
+                    for (let i = 1; i <= 7; i++) { // Start from yesterday (i=1) to 7 days ago (i=7)
+                        const date = new Date(todayIST);
+                        date.setDate(date.getDate() - i);
+                        const dateKey = formatISTDate(date);
+                        const dayCost = dailyCostMap.get(dateKey) || 0;
+                        thisWeekCost += dayCost;
+                    }
+                    console.log('IST - This Week Cost (sum of last 7 complete days, excluding today):', thisWeekCost);
+                    
+                    // Calculate This Month Cost: Sum of all COMPLETE days in current month (excluding today)
+                    thisMonthCost = 0;
+                    const firstDayThisMonth = new Date(todayIST.getFullYear(), todayIST.getMonth(), 1);
+                    // Reuse yesterdayIST from above (line 396)
+                    
+                    for (let d = new Date(firstDayThisMonth); d <= yesterdayIST; d.setDate(d.getDate() + 1)) {
+                        const dateKey = formatISTDate(d);
+                        const dayCost = dailyCostMap.get(dateKey) || 0;
+                        thisMonthCost += dayCost;
+                    }
+                    console.log('IST - This Month Cost (sum of complete days from', formatISTDate(firstDayThisMonth), 'to', formatISTDate(yesterdayIST), ', excluding today):', thisMonthCost);
+                    
+                } catch (e) {
+                    console.warn('Could not fetch daily cost data:', e);
+                    dailyCostData = []; // Use empty array as fallback
+                }
+                
+                // Query historical data for fallback calculations
+                const now = Math.floor(Date.now() / 1000);
+                const oneDayAgo = now - 86400;
+                const oneWeekAgo = now - (7 * 86400);
+                
+                // Calculate this month dates in IST for fallback
+                const todayIST = getIndiaDate();
+                const firstDayThisMonth = new Date(todayIST.getFullYear(), todayIST.getMonth(), 1);
+                firstDayThisMonth.setHours(0, 0, 0, 0);
+                const thisMonthStart = Math.floor(firstDayThisMonth.getTime() / 1000);
+                
+                // Calculate previous month dates
+                const lastDayPreviousMonth = new Date(firstDayThisMonth.getTime() - 1);
+                const firstDayPreviousMonth = new Date(todayIST.getFullYear(), todayIST.getMonth() - 1, 1);
+                const previousMonthStart = Math.floor(firstDayPreviousMonth.getTime() / 1000);
+                const previousMonthEnd = Math.floor(lastDayPreviousMonth.getTime() / 1000);
+
+                // Query range data for calculations (fallback and for week/month totals)
+                let rangeData = [];
+                try {
+                    rangeData = await queryPrometheusRange(
+                        `gcp_billing_cost_total{project="${projectId}"}`,
+                        Math.min(thisMonthStart, oneWeekAgo),
+                        now,
+                        '1d' // 1 day steps
+                    );
+                } catch (e) {
+                    console.warn('Could not fetch range data:', e);
+                }
+
+                // Query previous month cost directly from exporter metric
+                try {
+                    const previousMonthCostData = await queryPrometheus(`gcp_billing_cost_previous_month{project="${projectId}"}`);
+                    previousMonthCost = previousMonthCostData.length > 0 ? parseFloat(previousMonthCostData[0].value[1]) : 0;
+                } catch (e) {
+                    console.warn('Could not fetch previous month cost:', e);
+                    previousMonthCost = 0;
+                }
+
+                // Fallback calculations if daily metrics not available (use cumulative data)
+                if (yesterdayCost === 0 && rangeData.length > 0) {
+                    yesterdayCost = calculatePeriodCost(rangeData, oneDayAgo, now);
+                }
+                if (todayCost === 0 && rangeData.length > 0) {
+                    // Today's cost is the difference between current total and yesterday's end
+                    const todayIST = getIndiaDate();
+                    todayIST.setHours(0, 0, 0, 0);
+                    const todayStartTimestamp = Math.floor(todayIST.getTime() / 1000);
+                    todayCost = calculatePeriodCost(rangeData, todayStartTimestamp, now);
+                }
+                // Only use fallback if we didn't calculate from daily costs
+                if (thisWeekCost === 0 && rangeData.length > 0) {
+                    thisWeekCost = calculatePeriodCost(rangeData, oneWeekAgo, now);
+                }
+                if (thisMonthCost === 0) {
+                    thisMonthCost = calculatePeriodCost(rangeData, thisMonthStart, now) || currentTotal;
+                }
+                
+                // Also get range data as fallback for chart
+                try {
+                    dailyData = await queryPrometheusRange(
+                        `gcp_billing_cost_total{project="${projectId}"}`,
+                        oneWeekAgo,
+                        now,
+                        '86400s' // Exactly 1 day in seconds
+                    );
+                } catch (e) {
+                    console.warn('Could not fetch range data:', e);
+                    dailyData = []; // Use empty array as fallback
+                }
+
+                // Update UI
+                updateStats({
+                    yesterday: yesterdayCost,
+                    today: todayCost,
+                    thisWeek: thisWeekCost,
+                    thisMonth: thisMonthCost,
+                    previousMonth: previousMonthCost || 0
+                });
+
+                // Ensure variables are defined before calling updateCharts
+                if (typeof dailyCostData === 'undefined') {
+                    dailyCostData = [];
+                }
+                if (typeof dailyData === 'undefined') {
+                    dailyData = [];
+                }
+                if (typeof serviceCosts === 'undefined') {
+                    serviceCosts = [];
+                }
+                if (typeof dailyByServiceData === 'undefined') {
+                    dailyByServiceData = [];
+                }
+
+                updateCharts(dailyCostData, dailyData, serviceCosts, dailyByServiceData);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                const nowIST = getIndiaDate();
+                document.getElementById('lastUpdated').textContent = `Last updated: ${nowIST.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} (IST)`;
+
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                const extraHint = !DASHBOARD_CONFIG_LOADED
+                    ? ' (dashboard_config.js was not loaded; run python3 generate_dashboard_config.py and open the dashboard via a local web server, e.g. python3 -m http.server)'
+                    : '';
+                const promHint = PROMETHEUS_URL ? ` Make sure Prometheus is running at ${PROMETHEUS_URL}` : '';
+                document.getElementById('error').textContent = `Error: ${error.message}.${extraHint}${promHint}`;
+            }
+        }
+
+        async function queryPrometheus(query) {
+            const encodedQuery = encodeURIComponent(query);
+            const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodedQuery}`;
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                if (data.status === 'error') {
+                    throw new Error(data.error || 'Query error');
+                }
+                
+                return data.data.result || [];
+            } catch (error) {
+                console.error('Prometheus query error:', error);
+                console.error('Query:', query);
+                console.error('URL:', url);
+                throw error;
+            }
+        }
+
+        async function queryPrometheusRange(query, start, end, step) {
+            const encodedQuery = encodeURIComponent(query);
+            const url = `${PROMETHEUS_URL}/api/v1/query_range?query=${encodedQuery}&start=${start}&end=${end}&step=${step}`;
+            
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            if (data.status === 'error') {
+                throw new Error(data.error || 'Unknown error');
+            }
+            
+            return data.data.result || [];
+        }
+
+        function calculatePeriodCost(rangeData, startTime, endTime) {
+            if (!rangeData || rangeData.length === 0) return 0;
+            
+            const series = rangeData[0]; // Get first series
+            
+            if (!series || !series.values || series.values.length === 0) return 0;
+            
+            // For cumulative billing costs, we need to find the difference
+            // between the first and last value in the period
+            let startValue = null;
+            let endValue = null;
+            
+            series.values.forEach(point => {
+                const timestamp = point[0];
+                const value = parseFloat(point[1]);
+                
+                if (timestamp >= startTime && timestamp <= endTime) {
+                    if (startValue === null) {
+                        startValue = value;
+                    }
+                    endValue = value;
+                }
+            });
+            
+            // If we have both values, return the difference (cost incurred in period)
+            // Otherwise, return the end value (current total)
+            if (startValue !== null && endValue !== null) {
+                return endValue - startValue;
+            } else if (endValue !== null) {
+                return endValue;
+            }
+            
+            return 0;
+        }
+
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('en-IN', {
+                style: 'currency',
+                currency: 'INR',
+                maximumFractionDigits: 2
+            }).format(value);
+        }
+
+        function formatNumber(value) {
+            return new Intl.NumberFormat('en-IN', {
+                maximumFractionDigits: 2
+            }).format(value);
+        }
+
+        function updateStats(data) {
+            document.getElementById('yesterdayCost').textContent = formatCurrency(data.yesterday || 0);
+            document.getElementById('todayCost').textContent = formatCurrency(data.today || 0);
+            document.getElementById('thisWeekCost').textContent = formatCurrency(data.thisWeek || 0);
+            document.getElementById('thisMonthCost').textContent = formatCurrency(data.thisMonth || 0);
+            document.getElementById('previousMonthCost').textContent = formatCurrency(data.previousMonth || 0);
+        }
+
+        function updateCharts(dailyCostData, dailyData, serviceData, dailyByServiceData) {
+            // Ensure all parameters are defined
+            if (!dailyCostData) dailyCostData = [];
+            if (!dailyData) dailyData = [];
+            if (!serviceData) serviceData = [];
+            if (!dailyByServiceData) dailyByServiceData = [];
+            
+            // Cost trend chart (last 7 days)
+            const ctx1 = document.getElementById('costChart').getContext('2d');
+            
+            if (costChart) {
+                costChart.destroy();
+            }
+
+            // Extract daily costs (prefer direct daily metrics, fallback to calculated)
+            const labels = [];
+            const costs = [];
+            
+            // Create a map of dates to daily costs from direct daily metrics
+            const dailyCostMap = new Map();
+            if (dailyCostData && Array.isArray(dailyCostData) && dailyCostData.length > 0) {
+                dailyCostData.forEach(point => {
+                    if (point && point.metric && point.metric.date && point.value) {
+                        const dateStr = point.metric.date; // Format: YYYY-MM-DD
+                        const cost = parseFloat(point.value[1]) || 0;
+                        dailyCostMap.set(dateStr, cost);
+                    }
+                });
+            }
+            
+            // Generate labels and costs for all 7 days (last 7 complete days, excluding today) using IST
+            const todayIST = getIndiaDate();
+            todayIST.setHours(0, 0, 0, 0);
+            
+            // Get the most recent date available in dailyCostMap (should be yesterday or most recent complete day)
+            const availableDates = Array.from(dailyCostMap.keys()).sort().reverse();
+            const mostRecentDate = availableDates.length > 0 ? availableDates[0] : null;
+            
+            // Start from the most recent available date and go back 6 more days
+            // This gives us 7 complete days
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(todayIST);
+                date.setDate(date.getDate() - (i + 1)); // Subtract (i+1) to exclude today
+                
+                const dateLabel = date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                labels.push(dateLabel);
+                
+                // Try to get daily cost from direct metric first
+                // Use IST date format to match exporter (YYYY-MM-DD)
+                const dateKey = formatISTDate(date);
+                
+                const directDailyCost = dailyCostMap.get(dateKey);
+                
+                if (directDailyCost !== undefined && directDailyCost > 0) {
+                    costs.push(directDailyCost);
+                } else {
+                    // Fallback: calculate from cumulative data if available
+                    if (dailyData && dailyData.length > 0 && dailyData[0].values && dailyData[0].values.length > 0) {
+                        const dayStart = date.getTime();
+                        const dayEnd = dayStart + 86400000;
+                        
+                        // Find data points for this day and previous day
+                        const sortedPoints = dailyData[0].values
+                            .map(p => ({ timestamp: p[0] * 1000, cumulative: parseFloat(p[1]) }))
+                            .sort((a, b) => a.timestamp - b.timestamp);
+                        
+                        // Find the last point before or at dayEnd, and the last point before dayStart
+                        let dayEndPoint = null;
+                        let dayStartPoint = null;
+                        
+                        for (let j = sortedPoints.length - 1; j >= 0; j--) {
+                            const point = sortedPoints[j];
+                            if (!dayEndPoint && point.timestamp <= dayEnd) {
+                                dayEndPoint = point;
+                            }
+                            if (point.timestamp < dayStart) {
+                                dayStartPoint = point;
+                                break;
+                            }
+                        }
+                        
+                        if (dayEndPoint && dayStartPoint) {
+                            const dailyCost = dayEndPoint.cumulative - dayStartPoint.cumulative;
+                            costs.push(Math.max(0, dailyCost));
+                        } else if (dayEndPoint && i === 0) {
+                            // For today, use current total minus yesterday's end
+                            const yesterdayEnd = dayStart - 1;
+                            const yesterdayEndPoint = sortedPoints.find(p => p.timestamp <= yesterdayEnd);
+                            if (yesterdayEndPoint) {
+                                const dailyCost = dayEndPoint.cumulative - yesterdayEndPoint.cumulative;
+                                costs.push(Math.max(0, dailyCost));
+                            } else {
+                                costs.push(0);
+                            }
+                        } else {
+                            costs.push(0);
+                        }
+                    } else {
+                        costs.push(0);
+                    }
+                }
+            }
+            
+            // Debug: log the data to console
+            console.log('Chart Data:', { labels, costs, dailyCostMap: Array.from(dailyCostMap.entries()) });
+
+            costChart = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Daily Cost (INR)',
+                        data: costs,
+                        backgroundColor: costs.map((_, i) => chartColors[i % chartColors.length]),
+                        borderRadius: 12,
+                        borderSkipped: false,
+                        borderWidth: 0,
+                        barThickness: 'flex',
+                        maxBarThickness: 80
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                            padding: 15,
+                            titleFont: { size: 15, weight: 'bold' },
+                            bodyFont: { size: 14, weight: '600' },
+                            borderColor: '#667eea',
+                            borderWidth: 2,
+                            cornerRadius: 10,
+                            displayColors: true,
+                            callbacks: {
+                                title: function(context) {
+                                    return context[0].label;
+                                },
+                                label: function(context) {
+                                    return 'Cost: ' + formatCurrency(context.parsed.y);
+                                },
+                                labelColor: function(context) {
+                                    const colorIndex = context.dataIndex % chartColors.length;
+                                    return {
+                                        borderColor: chartColors[colorIndex],
+                                        backgroundColor: chartColors[colorIndex],
+                                        borderWidth: 2,
+                                        borderRadius: 2
+                                    };
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(102, 126, 234, 0.1)',
+                                lineWidth: 1,
+                                drawBorder: false
+                            },
+                            ticks: {
+                                font: { size: 12, weight: '600' },
+                                color: '#666',
+                                padding: 10,
+                                callback: function(value) {
+                                    return '₹' + formatNumber(value);
+                                }
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false,
+                                drawBorder: false
+                            },
+                            ticks: {
+                                font: { size: 13, weight: '600' },
+                                color: '#666',
+                                padding: 12
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Service cost chart
+            const ctx2 = document.getElementById('serviceChart').getContext('2d');
+            
+            if (serviceChart) {
+                serviceChart.destroy();
+            }
+
+            const serviceLabels = serviceData.map(s => s.metric.service || 'Unknown').slice(0, 10);
+            const serviceValues = serviceData.map(s => parseFloat(s.value[1])).slice(0, 10);
+
+            serviceChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: serviceLabels,
+                    datasets: [{
+                        label: 'Cost (INR)',
+                        data: serviceValues,
+                        backgroundColor: serviceValues.map((_, i) => chartColors[i % chartColors.length]),
+                        borderRadius: 8,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            titleFont: { size: 14, weight: 'bold' },
+                            bodyFont: { size: 13 },
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Cost: ' + formatCurrency(context.parsed.y);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                font: { size: 12 },
+                                callback: function(value) {
+                                    return '₹' + formatNumber(value);
+                                }
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                font: { size: 11 },
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Day-wise cost by service (stacked bar)
+            const ctxDailyBySvc = document.getElementById('dailyByServiceChart').getContext('2d');
+            if (dailyByServiceChart) {
+                dailyByServiceChart.destroy();
+            }
+            const dateLabels = [];
+            const dailyBySvcDatasets = [];
+            if (dailyByServiceData && dailyByServiceData.length > 0) {
+                const dateSet = new Set();
+                const svcCostMap = new Map(); // key: 'date|service', value: cost
+                dailyByServiceData.forEach(point => {
+                    if (!point || !point.metric || !point.value) return;
+                    const d = point.metric.date;
+                    const svc = point.metric.service || 'Unknown';
+                    const cost = parseFloat(point.value[1]) || 0;
+                    dateSet.add(d);
+                    const key = d + '|' + svc;
+                    svcCostMap.set(key, (svcCostMap.get(key) || 0) + cost);
+                });
+                const datesSorted = Array.from(dateSet).sort();
+                const dateLabelsFormatted = datesSorted.map(d => {
+                    const [y, m, day] = d.split('-');
+                    return new Date(parseInt(y), parseInt(m) - 1, parseInt(day)).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                });
+                // Top services by total cost across all days
+                const svcTotals = new Map();
+                dailyByServiceData.forEach(point => {
+                    const svc = point.metric.service || 'Unknown';
+                    const cost = parseFloat(point.value[1]) || 0;
+                    svcTotals.set(svc, (svcTotals.get(svc) || 0) + cost);
+                });
+                const topServicesOrdered = Array.from(svcTotals.entries())
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([name]) => name)
+                    .slice(0, 12);
+                topServicesOrdered.forEach((svcName, idx) => {
+                    dailyBySvcDatasets.push({
+                        label: svcName,
+                        data: datesSorted.map(d => svcCostMap.get(d + '|' + svcName) || 0),
+                        backgroundColor: chartColors[idx % chartColors.length],
+                        borderRadius: 4,
+                        borderSkipped: false,
+                        stack: 'stack0'
+                    });
+                });
+                dateLabels.push(...dateLabelsFormatted);
+            }
+            dailyByServiceChart = new Chart(ctxDailyBySvc, {
+                type: 'bar',
+                data: {
+                    labels: dateLabels.length ? dateLabels : ['No data yet'],
+                    datasets: dailyBySvcDatasets.length ? dailyBySvcDatasets : [{ label: 'No data yet', data: [0], backgroundColor: '#ddd', stack: 'stack0' }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            callbacks: {
+                                label: function(context) {
+                                    return (context.dataset.label || '') + ': ' + formatCurrency(context.parsed.y);
+                                },
+                                footer: function(items) {
+                                    const total = items.reduce((s, i) => s + (i.parsed.y || 0), 0);
+                                    return 'Total: ' + formatCurrency(total);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            grid: { display: false },
+                            ticks: { maxRotation: 45, minRotation: 45 }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '₹' + formatNumber(value);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Create pie chart for service distribution
+            const ctx3 = document.getElementById('pieChart').getContext('2d');
+            
+            if (pieChart) {
+                pieChart.destroy();
+            }
+
+            // Get top 10 services for pie chart
+            const topServices = serviceData
+                .map(s => ({
+                    name: s.metric.service || 'Unknown',
+                    cost: parseFloat(s.value[1])
+                }))
+                .sort((a, b) => b.cost - a.cost)
+                .slice(0, 10);
+
+            pieChart = new Chart(ctx3, {
+                type: 'doughnut',
+                data: {
+                    labels: topServices.map(s => s.name),
+                    datasets: [{
+                        data: topServices.map(s => s.cost),
+                        backgroundColor: topServices.map((_, i) => chartColors[i % chartColors.length]),
+                        borderWidth: 3,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '68%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                font: { size: 11, weight: '600' },
+                                padding: 10,
+                                boxWidth: 10,
+                                boxHeight: 10,
+                                usePointStyle: true
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            titleFont: { size: 14, weight: 'bold' },
+                            bodyFont: { size: 13 },
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const total = topServices.reduce((sum, s) => sum + s.cost, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return label + ': ' + formatCurrency(value) + ' (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+    </script>
+</body>
+</html>

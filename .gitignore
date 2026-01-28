@@ -1,0 +1,23 @@
+.env
+.env.local
+
+# Generated from .env
+dashboard_config.js
+prometheus.yml
+
+# Logs / caches
+exporter.log
+__pycache__/
+*.pyc
+
+# Local virtualenv
+venv/
+
+# GCP credentials (never commit)
+glassy-song-449317-a9-860df424cc09.json
+*service-account*.json
+*service_account*.json
+
+# Docker volumes (if created locally)
+prometheus-data/
+grafana-data/
