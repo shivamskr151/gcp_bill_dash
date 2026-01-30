@@ -1,0 +1,6 @@
+::1 - - [30/Jan/2026 09:38:26] "GET /gcp_billing_dashboard.html HTTP/1.1" 304 -
+::1 - - [30/Jan/2026 09:38:26] "GET /dashboard_config.js HTTP/1.1" 304 -
+::1 - - [30/Jan/2026 09:39:14] "HEAD /gcp_billing_dashboard.html HTTP/1.1" 200 -
+::1 - - [30/Jan/2026 09:39:19] "GET /gcp_billing_dashboard.html HTTP/1.1" 304 -
+::1 - - [30/Jan/2026 09:40:55] "GET /gcp_billing_dashboard.html HTTP/1.1" 200 -
+::1 - - [30/Jan/2026 09:40:55] "GET /dashboard_config.js HTTP/1.1" 304 -

@@ -140,6 +140,9 @@ def get_bigquery_billing_metrics():
             logger.info(f"Using standard table name: {billing_table}")
         else:
             logger.info(f"Found billing table: {billing_table}")
+            if resource_table:
+                logger.info(f"Found resource table: {resource_table}")
+
         
         table_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}.{billing_table}"
         
@@ -302,6 +305,72 @@ def get_bigquery_billing_metrics():
                 
             except Exception as e:
                 logger.warning(f"Could not fetch daily costs: {e}")
+            
+            # Query instance-level costs if resource table is available
+            if resource_table:
+                try:
+                    resource_table_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}.{resource_table}"
+                    logger.info(f"Querying instance costs from {resource_table_id}")
+                    
+                    instance_cost_query = f"""
+                    SELECT 
+                        EXTRACT(DATE FROM TIMESTAMP(usage_start_time) AT TIME ZONE 'Asia/Kolkata') as usage_date,
+                        (SELECT value FROM UNNEST(labels) WHERE key = 'goog-compute-vm-name' LIMIT 1) as vm_name,
+                        resource.name as resource_name,
+                        SUM(cost) as daily_cost,
+                        currency
+                    FROM `{resource_table_id}`
+                    WHERE (
+                        _PARTITIONTIME >= TIMESTAMP('{seven_days_ago_utc_str}')
+                        AND _PARTITIONTIME < TIMESTAMP('{today_utc_end_str}')
+                    )
+                    AND service.description = 'Compute Engine'
+                    GROUP BY usage_date, vm_name, resource_name, currency
+                    HAVING usage_date < EXTRACT(DATE FROM CURRENT_TIMESTAMP() AT TIME ZONE 'Asia/Kolkata')
+                    AND daily_cost > 0.01
+                    ORDER BY daily_cost DESC
+                    LIMIT 100
+                    """
+                    
+                    instance_query_job = client.query(instance_cost_query)
+                    instance_results = instance_query_job.result()
+                    
+                    instance_count = 0
+                    for row in instance_results:
+                        usage_date = row.usage_date
+                        daily_cost = float(row.daily_cost) if row.daily_cost else 0.0
+                        daily_currency = row.currency or currency
+                        
+                        # Determine instance name (prefer label, fallback to resource name)
+                        instance_name = "unknown"
+                        if row.vm_name:
+                            instance_name = row.vm_name
+                        elif row.resource_name:
+                            instance_name = row.resource_name
+                        
+                        # Clean up instance name (sometimes it's a full path)
+                        # e.g. .../instances/my-instance
+                        if '/' in instance_name:
+                            instance_name = instance_name.split('/')[-1]
+                            
+                        # Format date
+                        if hasattr(usage_date, 'strftime'):
+                            date_str = usage_date.strftime('%Y-%m-%d')
+                        else:
+                            date_str = str(usage_date).split('T')[0]
+                            
+                        metrics.append(
+                            f'gcp_billing_cost_instance_daily{{project="{PROJECT_ID}",date="{date_str}",vm_name="{instance_name}",currency="{daily_currency}"}} {daily_cost}'
+                        )
+                        instance_count += 1
+                        
+                    logger.info(f"Added {instance_count} instance cost metrics")
+                    
+                except Exception as e:
+                    logger.warning(f"Could not fetch instance costs: {e}")
+            else:
+                logger.info("Skipping instance costs query (no resource table found)")
+
             
             # Query previous month's cost
             try:
@@ -549,6 +618,11 @@ def format_prometheus_metrics(metrics_list):
     if not any("# HELP gcp_billing_cost_daily_by_service" in m for m in metrics_list) and any("gcp_billing_cost_daily_by_service" in m for m in metrics_list):
         formatted.append("# HELP gcp_billing_cost_daily_by_service Daily billing cost per service (by date)")
         formatted.append("# TYPE gcp_billing_cost_daily_by_service gauge")
+
+    if not any("# HELP gcp_billing_cost_instance_daily" in m for m in metrics_list) and any("gcp_billing_cost_instance_daily" in m for m in metrics_list):
+        formatted.append("# HELP gcp_billing_cost_instance_daily Daily billing cost per VM instance")
+        formatted.append("# TYPE gcp_billing_cost_instance_daily gauge")
+
     
     formatted.extend(metrics_list)
     return "\n".join(formatted) + "\n"
