@@ -290,30 +290,35 @@
             background: linear-gradient(135deg, #ff6b6b, #ee5a6f);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .stat-card:nth-child(2) .value {
             background: linear-gradient(135deg, #4ecdc4, #44a08d);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .stat-card:nth-child(3) .value {
             background: linear-gradient(135deg, #f093fb, #f5576c);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .stat-card:nth-child(4) .value {
             background: linear-gradient(135deg, #4facfe, #00f2fe);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .stat-card:nth-child(5) .value {
             background: linear-gradient(135deg, #fa709a, #fee140);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .stat-card .currency {
@@ -613,26 +618,39 @@
             </div>
 
             <div class="chart-container">
-                <h2>💻 Top VM Instances (Last 7 Days)</h2>
-                <p>Cost breakdown for Compute Engine instances (top 10 by cost)</p>
-                <div style="overflow-x: auto;">
-                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
-                        <thead>
-                            <tr
+                <h2>🏭 Cost by Instance (Day-wise)</h2>
+                <p style="color: #666; margin-bottom: 15px; font-size: 14px;">Stacked bars showing daily cost for all
+                    instances.</p>
+                <canvas id="dailyByInstanceChart"></canvas>
+            </div>
+
+
+
+            <div class="chart-container">
+                <h2>📋 Instance Cost Details (All SKUs)</h2>
+                <p>Detailed cost breakdown by SKU for Compute Engine instances (Last 7 Days)</p>
+                <div style="overflow-x: auto; max-height: 500px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px; min-width: 1000px;">
+                        <thead style="position: sticky; top: 0; background: var(--card-bg); z-index: 1;">
+                            <tr id="skuTableHeader"
                                 style="background: rgba(102, 126, 234, 0.1); border-bottom: 2px solid rgba(102, 126, 234, 0.2);">
                                 <th
-                                    style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-primary);">
+                                    style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-primary); min-width: 150px;">
                                     Instance Name</th>
                                 <th
-                                    style="padding: 12px; text-align: right; font-weight: 600; color: var(--text-primary);">
-                                    Total Cost (INR)</th>
+                                    style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-primary); min-width: 250px;">
+                                    SKU Description</th>
+                                <!-- Dynamic date columns will be inserted here -->
+                                <th
+                                    style="padding: 12px; text-align: right; font-weight: 600; color: var(--text-primary); width: 100px;">
+                                    Total</th>
                             </tr>
                         </thead>
-                        <tbody id="instanceTableBody">
+                        <tbody id="instanceSkuTableBody">
                             <tr>
-                                <td colspan="2"
-                                    style="padding: 20px; text-align: center; color: var(--text-secondary);">Loading
-                                    instance data...</td>
+                                <td colspan="3"
+                                    style="padding: 20px; text-align: center; color: var(--text-secondary);">Loading SKU
+                                    data...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -669,6 +687,7 @@
             window.DASHBOARD_CONFIG.projects.forEach(p => {
                 if (p && p.id) projects[p.id] = { id: p.id, name: p.name || p.id };
             });
+
         }
 
         // Helper function to get current date in India timezone (IST)
@@ -755,45 +774,127 @@
                     console.warn('Could not fetch daily-by-service data:', e);
                 }
 
-                // Get instance costs
-                try {
-                    const instanceCosts = await queryPrometheus(`gcp_billing_cost_instance_daily{project="${projectId}"}`);
 
-                    // Aggregate cost per instance (summing up daily costs)
-                    const instanceMap = new Map();
-                    instanceCosts.forEach(m => {
-                        if (m.metric && (m.metric.vm_name || m.metric.exported_instance)) {
-                            // Use vm_name if available, otherwise check for exported_instance (backward compatibility)
+
+                // Get instance SKU details
+                // Get instance SKU details
+                try {
+                    const skuCosts = await queryPrometheus(`gcp_billing_cost_instance_sku_daily{project="${projectId}"}`);
+
+                    // 1. Collect all dates and data
+                    const allDates = new Set();
+                    const skuMap = new Map(); // key = vm_name + "||" + sku, value = { total: 0, daily: {} }
+
+                    skuCosts.forEach(m => {
+                        if (m.metric && (m.metric.vm_name || m.metric.exported_instance) && m.metric.sku && m.metric.date) {
                             const name = m.metric.vm_name || m.metric.exported_instance;
+                            const sku = m.metric.sku;
+                            const date = m.metric.date; // YYYY-MM-DD
+                            const key = `${name}||${sku}`;
                             const cost = parseFloat(m.value[1]) || 0;
-                            instanceMap.set(name, (instanceMap.get(name) || 0) + cost);
+
+                            allDates.add(date);
+
+                            if (!skuMap.has(key)) {
+                                skuMap.set(key, { name, sku, total: 0, daily: {} });
+                            }
+
+                            const entry = skuMap.get(key);
+                            entry.daily[date] = (entry.daily[date] || 0) + cost;
+                            entry.total += cost;
                         }
                     });
 
-                    // Sort by cost descending and take top 10
-                    const sortedInstances = Array.from(instanceMap.entries())
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 10);
+                    // 2. Sort dates descending (newest first)
+                    const sortedDates = Array.from(allDates).sort().reverse();
 
-                    const tbody = document.getElementById('instanceTableBody');
-                    tbody.innerHTML = '';
+                    // 3. update table header
+                    const headerRow = document.getElementById('skuTableHeader');
+                    // Reset header to base columns
+                    headerRow.innerHTML = `
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-primary); min-width: 150px;">Instance Name</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-primary); min-width: 250px;">SKU Description</th>
+                    `;
 
-                    if (sortedInstances.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="2" style="padding: 15px; text-align: center; color: var(--text-secondary);">No instance data available for the last 7 days</td></tr>';
+                    // Add date columns
+                    sortedDates.forEach(date => {
+                        const th = document.createElement('th');
+                        th.style.padding = '12px';
+                        th.style.textAlign = 'right';
+                        th.style.fontWeight = '600';
+                        th.style.color = 'var(--text-primary)';
+                        th.style.minWidth = '100px';
+                        th.textContent = date.slice(5); // Show MM-DD
+                        headerRow.appendChild(th);
+                    });
+
+                    // Add Total column
+                    const totalTh = document.createElement('th');
+                    totalTh.style.padding = '12px';
+                    totalTh.style.textAlign = 'right';
+                    totalTh.style.fontWeight = '600';
+                    totalTh.style.color = 'var(--text-primary)';
+                    totalTh.style.width = '100px';
+                    totalTh.innerText = 'Total';
+                    headerRow.appendChild(totalTh);
+
+
+                    // 4. Sort SKUs by total cost (Show ALL, no slice)
+                    const sortedSkus = Array.from(skuMap.values())
+                        .sort((a, b) => b.total - a.total);
+
+                    const skuTbody = document.getElementById('instanceSkuTableBody');
+                    skuTbody.innerHTML = '';
+
+                    if (sortedSkus.length === 0) {
+                        skuTbody.innerHTML = `<tr><td colspan="${2 + sortedDates.length + 1}" style="padding: 15px; text-align: center; color: var(--text-secondary);">No detail data available</td></tr>`;
                     } else {
-                        sortedInstances.forEach(([name, cost]) => {
+                        // Calculate totals for footer
+                        const columnTotals = {};
+                        let grandTotal = 0;
+                        sortedDates.forEach(date => columnTotals[date] = 0);
+
+                        sortedSkus.forEach(item => {
                             const row = document.createElement('tr');
                             row.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+
+                            let dateColumnsHtml = '';
+                            sortedDates.forEach(date => {
+                                const dayCost = item.daily[date] || 0;
+                                columnTotals[date] += dayCost;
+                                dateColumnsHtml += `<td style="padding: 12px; text-align: right; color: var(--text-secondary); font-size: 13px;">${dayCost > 0 ? '₹' + dayCost.toFixed(2) : '-'}</td>`;
+                            });
+                            grandTotal += item.total;
+
                             row.innerHTML = `
-                                <td style="padding: 12px; color: var(--text-primary); font-family: monospace; font-size: 14px;">${name}</td>
-                                <td style="padding: 12px; text-align: right; font-weight: 600; color: var(--text-primary);">₹${cost.toFixed(2)}</td>
+                                <td style="padding: 12px; color: var(--text-primary); font-family: monospace; font-size: 14px;">${item.name}</td>
+                                <td style="padding: 12px; color: var(--text-secondary); font-size: 14px;">${item.sku}</td>
+                                ${dateColumnsHtml}
+                                <td style="padding: 12px; text-align: right; font-weight: 600; color: var(--text-primary);">₹${item.total.toFixed(2)}</td>
                             `;
-                            tbody.appendChild(row);
+                            skuTbody.appendChild(row);
                         });
+
+                        // Append Total Row
+                        const totalRow = document.createElement('tr');
+                        totalRow.style.backgroundColor = 'rgba(102, 126, 234, 0.05)';
+                        totalRow.style.fontWeight = 'bold';
+
+                        let totalColsHtml = '';
+                        sortedDates.forEach(date => {
+                            totalColsHtml += `<td style="padding: 12px; text-align: right; color: var(--text-primary); border-top: 2px solid #eee;">₹${columnTotals[date].toFixed(2)}</td>`;
+                        });
+
+                        totalRow.innerHTML = `
+                            <td colspan="2" style="padding: 12px; text-align: right; color: var(--text-primary); border-top: 2px solid #eee;">GRAND TOTAL</td>
+                            ${totalColsHtml}
+                            <td style="padding: 12px; text-align: right; color: var(--primary-color); border-top: 2px solid #eee;">₹${grandTotal.toFixed(2)}</td>
+                        `;
+                        skuTbody.appendChild(totalRow);
                     }
                 } catch (e) {
-                    console.warn('Could not fetch instance costs:', e);
-                    document.getElementById('instanceTableBody').innerHTML = '<tr><td colspan="2" style="padding: 15px; text-align: center; color: #c62828;">Error loading instance data</td></tr>';
+                    console.warn('Could not fetch SKU costs:', e);
+                    document.getElementById('instanceSkuTableBody').innerHTML = '<tr><td colspan="5" style="padding: 15px; text-align: center; color: #c62828;">Error loading SKU data</td></tr>';
                 }
 
                 // Get daily cost data directly (not cumulative) - get this first for accurate calculations
@@ -976,7 +1077,16 @@
                     dailyByServiceData = [];
                 }
 
-                updateCharts(dailyCostData, dailyData, serviceCosts, dailyByServiceData);
+                // Prepare daily instance data (already gathered in skuMap logic but we need to pass it cleanly)
+                // We'll re-aggregate from skuCosts to be safe or use what we have. 
+                // Let's create a clean list for the chart.
+                let dailyByInstanceData = [];
+                try {
+                    const skuCostsForChart = await queryPrometheus(`gcp_billing_cost_instance_sku_daily{project="${projectId}"}`);
+                    dailyByInstanceData = skuCostsForChart;
+                } catch (e) { console.warn(e); }
+
+                updateCharts(dailyCostData, dailyData, serviceCosts, dailyByServiceData, dailyByInstanceData);
 
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('dashboard').style.display = 'block';
@@ -1093,12 +1203,15 @@
             document.getElementById('previousMonthCost').textContent = formatCurrency(data.previousMonth || 0);
         }
 
-        function updateCharts(dailyCostData, dailyData, serviceData, dailyByServiceData) {
+        function updateCharts(dailyCostData, dailyData, serviceData, dailyByServiceData, dailyInstanceData) {
             // Ensure all parameters are defined
             if (!dailyCostData) dailyCostData = [];
             if (!dailyData) dailyData = [];
             if (!serviceData) serviceData = [];
             if (!dailyByServiceData) dailyByServiceData = [];
+            if (!dailyInstanceData) dailyInstanceData = [];
+
+            // ... (rest of the function) ...
 
             // Cost trend chart (last 7 days)
             const ctx1 = document.getElementById('costChart').getContext('2d');
@@ -1292,8 +1405,8 @@
                 serviceChart.destroy();
             }
 
-            const serviceLabels = serviceData.map(s => s.metric.service || 'Unknown').slice(0, 10);
-            const serviceValues = serviceData.map(s => parseFloat(s.value[1])).slice(0, 10);
+            const serviceLabels = serviceData.map(s => s.metric.service || 'Unknown');
+            const serviceValues = serviceData.map(s => parseFloat(s.value[1]));
 
             serviceChart = new Chart(ctx2, {
                 type: 'bar',
@@ -1412,7 +1525,12 @@
                     plugins: {
                         legend: {
                             display: true,
-                            position: 'top'
+                            position: 'top',
+                            labels: {
+                                boxWidth: 10,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
                         },
                         tooltip: {
                             backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1444,7 +1562,37 @@
                             }
                         }
                     }
-                }
+                },
+                plugins: [{
+                    id: 'topLabels',
+                    afterDatasetsDraw: function (chart, args, options) {
+                        const { ctx, scales: { x, y } } = chart;
+
+                        chart.data.labels.forEach((label, index) => {
+                            let total = 0;
+                            chart.data.datasets.forEach(dataset => {
+                                const value = dataset.data[index] || 0;
+                                total += value;
+                            });
+
+                            if (total > 0) {
+                                const xPos = x.getPixelForValue(index);
+                                // Find the top of the stack. Since it's stacked, we can find the y position of the last dataset that has a value,
+                                // or easier: assume the total value corresponds to the y-pixel of the stack top (roughly).
+                                // Actually, for stacked charts, we should ask the scale for the pixel of the total value.
+                                const yPos = y.getPixelForValue(total);
+
+                                ctx.save();
+                                ctx.font = 'bold 12px sans-serif';
+                                ctx.fillStyle = '#333';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'bottom';
+                                ctx.fillText(formatCurrency(total), xPos, yPos - 5);
+                                ctx.restore();
+                            }
+                        });
+                    }
+                }]
             });
 
             // Create pie chart for service distribution
@@ -1454,14 +1602,13 @@
                 pieChart.destroy();
             }
 
-            // Get top 10 services for pie chart
+            // Get services for pie chart (Show ALL)
             const topServices = serviceData
                 .map(s => ({
                     name: s.metric.service || 'Unknown',
                     cost: parseFloat(s.value[1])
                 }))
-                .sort((a, b) => b.cost - a.cost)
-                .slice(0, 10);
+                .sort((a, b) => b.cost - a.cost);
 
             pieChart = new Chart(ctx3, {
                 type: 'doughnut',
@@ -1506,6 +1653,112 @@
                         }
                     }
                 }
+            });
+
+            // Instance by Day Chart
+            const ctxInstanceDaily = document.getElementById('dailyByInstanceChart').getContext('2d');
+            if (window.dailyByInstanceChartRef) {
+                window.dailyByInstanceChartRef.destroy();
+            }
+
+            const instDateSet = new Set();
+            const instCostMap = new Map(); // key: 'date|instance', value: cost
+            const instTotals = new Map();
+
+            // Aggregate data
+            dailyInstanceData.forEach(m => {
+                if (m.metric && (m.metric.vm_name || m.metric.exported_instance) && m.metric.date) {
+                    const name = m.metric.vm_name || m.metric.exported_instance;
+                    const date = m.metric.date;
+                    const cost = parseFloat(m.value[1]) || 0;
+
+                    instDateSet.add(date);
+                    const key = date + '|' + name;
+                    instCostMap.set(key, (instCostMap.get(key) || 0) + cost);
+                    instTotals.set(name, (instTotals.get(name) || 0) + cost);
+                }
+            });
+
+            const instDatesSorted = Array.from(instDateSet).sort();
+            const instDateLabels = instDatesSorted.map(d => {
+                const [y, m, day] = d.split('-');
+                return new Date(parseInt(y), parseInt(m) - 1, parseInt(day)).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+            });
+
+            // Top Instances (Show ALL)
+            const topInstances = Array.from(instTotals.entries())
+                .sort((a, b) => b[1] - a[1])
+                .map(([name]) => name);
+
+            const instDatasets = [];
+            topInstances.forEach((name, idx) => {
+                instDatasets.push({
+                    label: name,
+                    data: instDatesSorted.map(d => instCostMap.get(d + '|' + name) || 0),
+                    backgroundColor: chartColors[idx % chartColors.length],
+                    borderRadius: 4,
+                    borderSkipped: false,
+                    stack: 'stack1'
+                });
+            });
+
+            window.dailyByInstanceChartRef = new Chart(ctxInstanceDaily, {
+                type: 'bar',
+                data: {
+                    labels: instDateLabels.length ? instDateLabels : ['No data'],
+                    datasets: instDatasets.length ? instDatasets : [{ label: 'No data', data: [0], backgroundColor: '#ddd' }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: true, position: 'top' },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            callbacks: {
+                                label: function (context) {
+                                    return (context.dataset.label || '') + ': ' + formatCurrency(context.parsed.y);
+                                },
+                                footer: function (items) {
+                                    const total = items.reduce((s, i) => s + (i.parsed.y || 0), 0);
+                                    return 'Total: ' + formatCurrency(total);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true, grid: { display: false } },
+                        y: { stacked: true, beginAtZero: true, ticks: { callback: v => '₹' + formatNumber(v) } }
+                    }
+                },
+                plugins: [{
+                    id: 'topLabels',
+                    afterDatasetsDraw: function (chart, args, options) {
+                        const { ctx, scales: { x, y } } = chart;
+
+                        chart.data.labels.forEach((label, index) => {
+                            let total = 0;
+                            chart.data.datasets.forEach(dataset => {
+                                const value = dataset.data[index] || 0;
+                                total += value;
+                            });
+
+                            if (total > 0) {
+                                const xPos = x.getPixelForValue(index);
+                                const yPos = y.getPixelForValue(total);
+
+                                ctx.save();
+                                ctx.font = 'bold 12px sans-serif';
+                                ctx.fillStyle = '#333';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'bottom';
+                                ctx.fillText(formatCurrency(total), xPos, yPos - 5);
+                                ctx.restore();
+                            }
+                        });
+                    }
+                }]
             });
         }
 

@@ -366,6 +366,61 @@ def get_bigquery_billing_metrics():
                         
                     logger.info(f"Added {instance_count} instance cost metrics")
                     
+                    # Query SKU-level breakdown for instances
+                    logger.info("Querying SKU-level breakdown for instances")
+                    sku_cost_query = f"""
+                    SELECT 
+                        EXTRACT(DATE FROM TIMESTAMP(usage_start_time) AT TIME ZONE 'Asia/Kolkata') as usage_date,
+                        (SELECT value FROM UNNEST(labels) WHERE key = 'goog-compute-vm-name' LIMIT 1) as vm_name,
+                        resource.name as resource_name,
+                        sku.description as sku_description,
+                        SUM(cost) as daily_cost,
+                        currency
+                    FROM `{resource_table_id}`
+                    WHERE (
+                        _PARTITIONTIME >= TIMESTAMP('{seven_days_ago_utc_str}')
+                        AND _PARTITIONTIME < TIMESTAMP('{today_utc_end_str}')
+                    )
+                    AND service.description = 'Compute Engine'
+                    GROUP BY usage_date, vm_name, resource_name, sku_description, currency
+                    HAVING usage_date < EXTRACT(DATE FROM CURRENT_TIMESTAMP() AT TIME ZONE 'Asia/Kolkata')
+                    AND daily_cost > 0.01
+                    ORDER BY daily_cost DESC
+                    LIMIT 200
+                    """
+                    
+                    sku_query_job = client.query(sku_cost_query)
+                    sku_results = sku_query_job.result()
+                    
+                    sku_count = 0
+                    for row in sku_results:
+                        usage_date = row.usage_date
+                        daily_cost = float(row.daily_cost) if row.daily_cost else 0.0
+                        daily_currency = row.currency or currency
+                        sku_desc = (row.sku_description or "Unknown").replace('"', '\\"')
+                        
+                        # Determine instance name
+                        instance_name = "unknown"
+                        if row.vm_name:
+                            instance_name = row.vm_name
+                        elif row.resource_name:
+                            instance_name = row.resource_name
+                        
+                        if '/' in instance_name:
+                            instance_name = instance_name.split('/')[-1]
+                            
+                        # Format date
+                        date_str = str(usage_date).split('T')[0]
+                        if hasattr(usage_date, 'strftime'):
+                            date_str = usage_date.strftime('%Y-%m-%d')
+                            
+                        metrics.append(
+                            f'gcp_billing_cost_instance_sku_daily{{project="{PROJECT_ID}",date="{date_str}",vm_name="{instance_name}",sku="{sku_desc}",currency="{daily_currency}"}} {daily_cost}'
+                        )
+                        sku_count += 1
+                        
+                    logger.info(f"Added {sku_count} instance SKU cost metrics")
+                    
                 except Exception as e:
                     logger.warning(f"Could not fetch instance costs: {e}")
             else:
@@ -622,6 +677,10 @@ def format_prometheus_metrics(metrics_list):
     if not any("# HELP gcp_billing_cost_instance_daily" in m for m in metrics_list) and any("gcp_billing_cost_instance_daily" in m for m in metrics_list):
         formatted.append("# HELP gcp_billing_cost_instance_daily Daily billing cost per VM instance")
         formatted.append("# TYPE gcp_billing_cost_instance_daily gauge")
+
+    if not any("# HELP gcp_billing_cost_instance_sku_daily" in m for m in metrics_list) and any("gcp_billing_cost_instance_sku_daily" in m for m in metrics_list):
+        formatted.append("# HELP gcp_billing_cost_instance_sku_daily Daily billing cost per VM instance and SKU")
+        formatted.append("# TYPE gcp_billing_cost_instance_sku_daily gauge")
 
     
     formatted.extend(metrics_list)
