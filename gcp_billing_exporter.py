@@ -329,7 +329,6 @@ def get_bigquery_billing_metrics():
                     HAVING usage_date < EXTRACT(DATE FROM CURRENT_TIMESTAMP() AT TIME ZONE 'Asia/Kolkata')
                     AND daily_cost > 0.01
                     ORDER BY daily_cost DESC
-                    LIMIT 100
                     """
                     
                     instance_query_job = client.query(instance_cost_query)
@@ -386,7 +385,6 @@ def get_bigquery_billing_metrics():
                     HAVING usage_date < EXTRACT(DATE FROM CURRENT_TIMESTAMP() AT TIME ZONE 'Asia/Kolkata')
                     AND daily_cost > 0.01
                     ORDER BY daily_cost DESC
-                    LIMIT 200
                     """
                     
                     sku_query_job = client.query(sku_cost_query)
