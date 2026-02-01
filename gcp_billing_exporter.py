@@ -105,8 +105,11 @@ def get_bigquery_billing_metrics():
         # Use IST timezone (UTC+5:30) for date calculations to match dashboard
         from datetime import timezone, timedelta
         ist_tz = timezone(timedelta(hours=5, minutes=30))
-        today_utc = datetime.utcnow()
+        today_utc = datetime.now(timezone.utc)
         today = today_utc.astimezone(ist_tz)  # Convert to IST
+        
+        # Use yesterday as the end date since today's data is incomplete
+        yesterday = today - timedelta(days=1)
         first_day = today.replace(day=1)
         
         # Calculate previous month dates
@@ -147,6 +150,8 @@ def get_bigquery_billing_metrics():
         table_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}.{billing_table}"
         
         # Query billing cost - try partition time first, then usage_start_time
+        # Use yesterday as end date since today's data is incomplete
+        query_end_date = yesterday + timedelta(days=1)  # Include all of yesterday
         query = f"""
         SELECT 
             SUM(cost) as total_cost,
@@ -156,14 +161,16 @@ def get_bigquery_billing_metrics():
         FROM `{table_id}`
         WHERE (
             _PARTITIONTIME >= TIMESTAMP('{first_day.strftime('%Y-%m-%d')}')
-            AND _PARTITIONTIME < TIMESTAMP('{today.strftime('%Y-%m-%d')}')
+            AND _PARTITIONTIME < TIMESTAMP('{query_end_date.strftime('%Y-%m-%d')}')
         ) OR (
             usage_start_time >= TIMESTAMP('{first_day.strftime('%Y-%m-%d')}')
-            AND usage_start_time < TIMESTAMP('{today.strftime('%Y-%m-%d')}')
+            AND usage_start_time < TIMESTAMP('{query_end_date.strftime('%Y-%m-%d')}')
         )
         GROUP BY service.description, service.id, currency
         ORDER BY total_cost DESC
         """
+        
+        logger.info(f"Querying current month data from {first_day.strftime('%Y-%m-%d')} to {query_end_date.strftime('%Y-%m-%d')}")
         
         try:
             query_job = client.query(query)
@@ -171,6 +178,7 @@ def get_bigquery_billing_metrics():
             
             total_cost = 0.0
             currency = "USD"
+            row_count = 0
             
             for row in results:
                 cost = float(row.total_cost) if row.total_cost else 0.0
@@ -178,13 +186,54 @@ def get_bigquery_billing_metrics():
                 currency = row.currency or "USD"
                 service_name = row.service_name or "Unknown"
                 service_id = row.service_id or "unknown"
+                row_count += 1
                 
                 # Add per-service cost metric
                 metrics.append(
                     f'gcp_billing_cost{{project="{PROJECT_ID}",service="{service_name}",service_id="{service_id}",currency="{currency}"}} {cost}'
                 )
             
-            # Add total cost metric (current month)
+            logger.info(f"Current month query returned {row_count} services, total cost: {total_cost} {currency}")
+            
+            # If current month has no data (e.g., first day of month), use previous month's data
+            if row_count == 0 or total_cost == 0:
+                logger.info("Current month has no data, querying previous month as fallback...")
+                prev_month_query = f"""
+                SELECT 
+                    SUM(cost) as total_cost,
+                    service.description as service_name,
+                    service.id as service_id,
+                    currency
+                FROM `{table_id}`
+                WHERE (
+                    _PARTITIONTIME >= TIMESTAMP('{previous_month_start.strftime('%Y-%m-%d')}')
+                    AND _PARTITIONTIME < TIMESTAMP('{first_day.strftime('%Y-%m-%d')}')
+                ) OR (
+                    usage_start_time >= TIMESTAMP('{previous_month_start.strftime('%Y-%m-%d')}')
+                    AND usage_start_time < TIMESTAMP('{first_day.strftime('%Y-%m-%d')}')
+                )
+                GROUP BY service.description, service.id, currency
+                ORDER BY total_cost DESC
+                """
+                prev_query_job = client.query(prev_month_query)
+                prev_results = prev_query_job.result()
+                
+                total_cost = 0.0
+                for row in prev_results:
+                    cost = float(row.total_cost) if row.total_cost else 0.0
+                    total_cost += cost
+                    currency = row.currency or "USD"
+                    service_name = row.service_name or "Unknown"
+                    service_id = row.service_id or "unknown"
+                    
+                    # Add per-service cost metric
+                    metrics.append(
+                        f'gcp_billing_cost{{project="{PROJECT_ID}",service="{service_name}",service_id="{service_id}",currency="{currency}"}} {cost}'
+                    )
+                
+                logger.info(f"Using previous month data: {total_cost} {currency}")
+            
+            # Add total cost metric (current month or previous month if current is empty)
             metrics.append(
                 f'gcp_billing_cost_total{{project="{PROJECT_ID}",billing_account_id="{BILLING_ACCOUNT_ID}",currency="{currency}"}} {total_cost}'
             )

@@ -226,47 +226,56 @@ def generate_billing_pdf(
     c.drawString(margin_x, y, "Instance Cost Details")
     y -= 20
 
+    # Aggregate costs by instance
+    instance_costs_map: Dict[str, float] = {}
+    for item in instance_sku_costs:
+        # Filter out snapshots, images, and other non-instance resources
+        sku_lower = item['sku'].lower()
+        if "snapshot" in sku_lower or "image" in sku_lower:
+            continue
+            
+        vm_name = item['vm_name']
+        cost = item['cost']
+        instance_costs_map[vm_name] = instance_costs_map.get(vm_name, 0.0) + cost
+    
+    # Sort instances by total cost (descending)
+    sorted_instances = sorted(instance_costs_map.items(), key=lambda x: x[1], reverse=True)
+
     # Table Header
     c.setFont("Helvetica-Bold", 9)
-    # Define columns: Instance (left), SKU (left, offset), Cost (right)
+    # Define columns: Instance (left), Cost (right)
+    # Only 2 columns now since we are aggregating SKUs
     col_instance = margin_x
-    col_sku = margin_x + 150
     col_cost = width - margin_x
     
     c.drawString(col_instance, y, "Instance Name")
-    c.drawString(col_sku, y, "SKU Description")
-    c.drawRightString(col_cost, y, f"Cost ({currency})")
+    c.drawRightString(col_cost, y, f"Total Cost ({currency})")
     y -= 10
     c.line(margin_x, y, width - margin_x, y)
     y -= 15
 
     c.setFont("Helvetica", 8)
-    if instance_sku_costs:
-        # Sort by cost descending
-        sorted_items = sorted(instance_sku_costs, key=lambda x: x['cost'], reverse=True)
-        total_instance_cost = sum(item['cost'] for item in sorted_items)
+    if sorted_instances:
+        total_instance_cost = sum(cost for _, cost in sorted_instances)
         
-        for item in sorted_items:
+        for vm_name, cost in sorted_instances:
             if y < 50:
                 c.showPage()
                 y = height - 60
                 # Re-draw header on new page
                 c.setFont("Helvetica-Bold", 9)
                 c.drawString(col_instance, y, "Instance Name")
-                c.drawString(col_sku, y, "SKU Description")
-                c.drawRightString(col_cost, y, f"Cost ({currency})")
+                c.drawRightString(col_cost, y, f"Total Cost ({currency})")
                 y -= 10
                 c.line(margin_x, y, width - margin_x, y)
                 y -= 15
                 c.setFont("Helvetica", 8)
             
             # Truncate names if too long
-            vm_text = item['vm_name'][:25] + "..." if len(item['vm_name']) > 28 else item['vm_name']
-            sku_text = item['sku'][:50] + "..." if len(item['sku']) > 53 else item['sku']
+            vm_text = vm_name[:60] + "..." if len(vm_name) > 63 else vm_name
             
             c.drawString(col_instance, y, vm_text)
-            c.drawString(col_sku, y, sku_text)
-            c.drawRightString(col_cost, y, f"{item['cost']:,.2f}")
+            c.drawRightString(col_cost, y, f"{cost:,.2f}")
             y -= 12
         
         # Add total line
