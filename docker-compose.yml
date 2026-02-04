@@ -1,4 +1,30 @@
 services:
+  exporter:
+    build: .
+    container_name: gcp-billing-exporter
+    ports:
+      - "${EXPORTER_PORT:-9091}:9091"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  dashboard:
+    image: python:3.10-slim
+    container_name: gcp-billing-dashboard
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    command: python -m http.server 8000
+    networks:
+      - monitoring
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     container_name: gcp-billing-prometheus
@@ -9,6 +35,9 @@ services:
     volumes:
       - prometheus-data:/prometheus
     entrypoint: ["/bin/sh","-c"]
+    # Override scrape target to point to container name 'exporter'
+    environment:
+      - PROMETHEUS_SCRAPE_TARGET=exporter:9091
     command:
       - |
         set -eu
@@ -40,6 +69,8 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    depends_on:
+      - exporter
 
   grafana:
     image: grafana/grafana:latest
