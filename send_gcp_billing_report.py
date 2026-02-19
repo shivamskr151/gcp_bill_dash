@@ -54,6 +54,7 @@ SMTP_CONFIG = {
         "msdeo@variphi.com",
         "atulverma2861@gmail.com",
         "yrshivani2001@gmail.com"
+        "ppalash62@gmail.com"
     ],
 }
 
