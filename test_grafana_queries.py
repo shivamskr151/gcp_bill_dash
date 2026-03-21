@@ -12,6 +12,10 @@ if not DASHBOARD_PROMETHEUS_URL:
 
 PROMETHEUS_URL = DASHBOARD_PROMETHEUS_URL
 
+
+def test():
+    print("this is rohan code !!")
+
 def test_query(query, description):
     """Test a Prometheus query"""
     print(f"\n{'='*60}")
